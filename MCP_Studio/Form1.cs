@@ -15,6 +15,8 @@ using System.Text;
 using ModelContextProtocol.Protocol.Types;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
+using Azure.AI.OpenAI;
+using Azure;
 
 namespace MCP_Studio
 {
@@ -46,10 +48,16 @@ namespace MCP_Studio
             try
             {
                 // JSON 파일에서 OpenAI API 설정을 읽어옵니다.
-                aiConfig = LoadOpenAiConfig("config.json");
-                _modelId = aiConfig.ModelID;
+                aiConfig = LoadOpenAiConfig("config.json");              
+                // Azure OpenAI 리소스 엔드포인트 및 API 키
+                var endpoint = new Uri(aiConfig.Endpoint);
+                var apiKey = aiConfig.ApiKey; // 실제 API 키로 대체하세요
+                var deploymentName = aiConfig.DeploymentId; // 배포한 모델의 이름
 
-                _chatClient = new ChatClient(aiConfig.ModelID, aiConfig.ApiKey);
+                // AzureOpenAIClient 초기화
+                var azureClient = new AzureOpenAIClient(endpoint, new AzureKeyCredential(apiKey));
+                _chatClient = azureClient.GetChatClient(deploymentName);
+
                 AppendToChat("System", "OpenAI 클라이언트 초기화 완료");
             }
             catch (FileNotFoundException ex)
@@ -739,7 +747,7 @@ namespace MCP_Studio
                 AppendToChat("System", "새로운 대화로 응답을 요청합니다.");
 
                 // 사용 중인 모델 로깅 (디버깅용)
-                AppendToChat("System", $"사용 중인 모델: {aiConfig.ModelID}");
+                AppendToChat("System", $"사용 중인 모델: {aiConfig.DeploymentId}");
 
                 // 새 대화로 API 호출
                 var finalResponse = await _chatClient.CompleteChatAsync(newConversation, options);

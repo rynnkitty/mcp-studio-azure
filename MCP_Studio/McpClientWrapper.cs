@@ -98,6 +98,72 @@ namespace MCP_Studio
             var result = await _client.CallToolAsync(toolName, parameters, default);
             return result.Content.FirstOrDefault(c => c.Type == "text")?.Text ?? string.Empty;
         }
+        public async Task<Dictionary<string, object>> CallToolAsyncEnhanced(string toolName, Dictionary<string, object?> parameters, CancellationToken cancellationToken = default)
+        {
+            var result = await _client.CallToolAsync(toolName, parameters, default);
+            var response = new Dictionary<string, object>();
+
+            foreach (var content in result.Content)
+            {
+                switch (content.Type)
+                {
+                    case "text":
+                        response["text"] = content.Text ?? string.Empty;
+                        break;
+
+                    case "image":
+                        // 이미지 데이터(Base64 형식)와 MIME 타입 저장
+                        if (!string.IsNullOrEmpty(content.Data))
+                        {
+                            response["imageData"] = content.Data;
+                            if (!string.IsNullOrEmpty(content.MimeType))
+                            {
+                                response["imageMimeType"] = content.MimeType;
+                            }
+                        }
+                        break;
+
+                    case "audio":
+                        // 오디오 데이터(Base64 형식)와 MIME 타입 저장
+                        if (!string.IsNullOrEmpty(content.Data))
+                        {
+                            response["audioData"] = content.Data;
+                            if (!string.IsNullOrEmpty(content.MimeType))
+                            {
+                                response["audioMimeType"] = content.MimeType;
+                            }
+                        }
+                        break;
+
+                    case "resource":
+                        // 리소스 데이터 처리
+                        if (content.Resource != null)
+                        {
+                            // 리소스 타입에 따라 다르게 처리
+                            // TextResourceContents 또는 BlobResourceContents 일 수 있음
+                            response["resource"] = content.Resource;
+                            if (!string.IsNullOrEmpty(content.MimeType))
+                            {
+                                response["resourceMimeType"] = content.MimeType;
+                            }
+                        }
+                        break;
+
+                    default:
+                        // 알 수 없는 타입은 raw 형태로 저장
+                        response[$"unknown_{content.Type}"] = content;
+                        break;
+                }
+
+                // 추가적으로 annotations이 있는 경우 처리
+                if (content.Annotations != null)
+                {
+                    response[$"annotations_{content.Type}"] = content.Annotations;
+                }
+            }
+
+            return response;
+        }
         public async ValueTask DisposeAsync()
         {
             if (_client != null)

@@ -669,8 +669,11 @@ namespace MCP_Studio
         {
             AppendToChat("System", $"{toolCalls.Count}개의 도구 호출을 처리합니다...");
 
-            // 도구 응답을 저장할 변수
-            Dictionary<string, string> toolResponses = new Dictionary<string, string>();
+            // 도구 응답을 저장할 변수 (다양한 콘텐츠 타입을 저장하는 Dictionary로 변경)
+            Dictionary<string, Dictionary<string, object>> toolResponses = new Dictionary<string, Dictionary<string, object>>();
+
+            // 텍스트 응답만 저장하는 변수 (기존 코드와의 호환성 유지)
+            Dictionary<string, string> textResponses = new Dictionary<string, string>();
 
             // 마지막 사용자 메시지 찾기
             string lastUserMessage = "";
@@ -708,11 +711,87 @@ namespace MCP_Studio
                         continue;
                     }
 
-                    string mcpResponse = await mcpClient.CallToolAsync(functionName, parameters);
-                    AppendToChat("System", $"도구 응답: {mcpResponse}");
-
-                    // 도구 응답 저장
+                    // 향상된 도구 호출 메서드 사용
+                    var mcpResponse = await mcpClient.CallToolAsyncEnhanced(functionName, parameters);
                     toolResponses[functionName] = mcpResponse;
+
+                    // 텍스트 응답 처리
+                    if (mcpResponse.TryGetValue("text", out var textResponse))
+                    {
+                        string textContent = textResponse?.ToString() ?? string.Empty;
+                        AppendToChat("System", $"도구 텍스트 응답: {textContent}");
+                        textResponses[functionName] = textContent;
+                    }
+
+                    // 이미지 데이터 처리
+                    if (mcpResponse.TryGetValue("imageData", out var imageData) && imageData is string base64Image)
+                    {
+                        string mimeType = mcpResponse.TryGetValue("imageMimeType", out var mimeTypeObj)
+                            ? mimeTypeObj.ToString()
+                            : "image/png";  // 기본값
+
+                        AppendToChat("System", $"도구 이미지 응답: [이미지 데이터, MIME 타입: {mimeType}]");
+
+                        // 이미지를 표시하는 폼 호출 (메인 UI 스레드에서 실행)
+                        await Task.Run(() =>
+                        {
+                            if (this.InvokeRequired)
+                            {
+                                this.Invoke((MethodInvoker)delegate
+                                {
+                                    var imageViewer = new ImageViewerForm();
+                                    imageViewer.LoadBase64Image(base64Image);
+                                    imageViewer.Text = $"이미지 뷰어 - {mimeType}";
+                                    imageViewer.Show(this);
+                                });
+                            }
+                            else
+                            {
+                                var imageViewer = new ImageViewerForm();
+                                imageViewer.LoadBase64Image(base64Image);
+                                imageViewer.Text = $"이미지 뷰어 - {mimeType}";
+                                imageViewer.Show(this);
+                            }
+                        });
+
+                        // 텍스트 응답이 없는 경우 이미지 응답 표시
+                        if (!textResponses.ContainsKey(functionName))
+                        {
+                            textResponses[functionName] = $"[이미지 데이터가 표시되었습니다. 타입: {mimeType}]";
+                        }
+                    }
+
+                    // 오디오 데이터 처리
+                    if (mcpResponse.TryGetValue("audioData", out var audioData) && audioData is string base64Audio)
+                    {
+                        string mimeType = mcpResponse.TryGetValue("audioMimeType", out var mimeTypeObj)
+                            ? mimeTypeObj.ToString()
+                            : "audio/mp3";  // 기본값
+
+                        AppendToChat("System", $"도구 오디오 응답: [오디오 데이터, MIME 타입: {mimeType}]");
+
+                        // 텍스트 응답이 없는 경우 오디오 응답 표시
+                        if (!textResponses.ContainsKey(functionName))
+                        {
+                            textResponses[functionName] = $"[오디오 데이터가 수신되었습니다. 타입: {mimeType}]";
+                        }
+                    }
+
+                    // 리소스 데이터 처리
+                    if (mcpResponse.TryGetValue("resource", out var resource))
+                    {
+                        string mimeType = mcpResponse.TryGetValue("resourceMimeType", out var mimeTypeObj)
+                            ? mimeTypeObj.ToString()
+                            : "unknown";
+
+                        AppendToChat("System", $"도구 리소스 응답: [리소스 데이터, MIME 타입: {mimeType}]");
+
+                        // 텍스트 응답이 없는 경우 리소스 응답 표시
+                        if (!textResponses.ContainsKey(functionName))
+                        {
+                            textResponses[functionName] = $"[리소스 데이터가 수신되었습니다. 타입: {mimeType}]";
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -734,7 +813,8 @@ namespace MCP_Studio
                 combinedMessage.AppendLine();
                 combinedMessage.AppendLine("도구 실행 결과:");
 
-                foreach (var response in toolResponses)
+                // 기존 코드와 유사하게 텍스트 기반 응답을 사용
+                foreach (var response in textResponses)
                 {
                     combinedMessage.AppendLine($"- {response.Key}: {response.Value}");
                 }
@@ -766,7 +846,7 @@ namespace MCP_Studio
                         // 원래 채팅 이력에 도구 응답 및 어시스턴트 응답 추가
                         // 도구 실행 결과를 포함한 사용자 메시지
                         string toolResultsForHistory = "도구 실행 결과:\n";
-                        foreach (var response in toolResponses)
+                        foreach (var response in textResponses)
                         {
                             toolResultsForHistory += $"- {response.Key}: {response.Value}\n";
                         }
@@ -804,7 +884,6 @@ namespace MCP_Studio
                 _chatHistory.Add(new AssistantChatMessage(errorReply));
             }
         }
-
         private void ProcessAssistantResponse(System.ClientModel.ClientResult<ChatCompletion> response)
         {
             if (response.Value.Content != null && response.Value.Content.Count > 0)
